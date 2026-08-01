@@ -2,7 +2,7 @@
 
 이미지를 실제 판매되는 디폼블럭 색상에 맞춘 격자 도안으로 변환하는 웹앱입니다.
 
-**[웹에서 바로 사용하기](https://deform-block-pattern.yoswuk.chatgpt.site)**
+**[웹에서 바로 사용하기](https://yoswuk.github.io/deform-block-pattern/)**
 
 ## 주요 기능
 
