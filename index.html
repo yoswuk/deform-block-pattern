@@ -50,11 +50,219 @@ function diversifyLightTones(slots,target,context,out,initialOut,use,cols,rows){
 
 function gridNeighbors(n,cols,rows){let x=n%cols,y=Math.floor(n/cols),a=[];if(x)a.push(n-1);if(x+1<cols)a.push(n+1);if(y)a.push(n-cols);if(y+1<rows)a.push(n+cols);return a}
 function referenceDistance(reference,n,m){if(!reference[n]||!reference[m])return Infinity;return Math.sqrt(d(reference[n].lab,reference[m].lab))}
-function repairWarmGrayBasins(reference,slots,target,context,out,use,cols,rows){let warmCandidates=use.filter(c=>["19","20","21","31","32"].includes(c.id));if(!warmCandidates.length)return out;let seen=new Uint8Array(out.length),result=out.slice();for(let start=0;start<out.length;start++){if(seen[start]||!out[start]||!GRAY_IDS.has(out[start].id))continue;let comp=[],queue=[start];seen[start]=1;while(queue.length){let n=queue.pop();comp.push(n);for(let m of gridNeighbors(n,cols,rows)){if(seen[m]||!out[m]||!GRAY_IDS.has(out[m].id)||referenceDistance(reference,n,m)>=.060)continue;seen[m]=1;queue.push(m)}}let meanL=comp.reduce((s,n)=>s+reference[n].lab[0],0)/comp.length;if(meanL<=.34||meanL>=.82)continue;let walk=comp.slice(),steps=new Map(comp.map(n=>[n,0])),warmWeight=0,conflict=0,aa=0,bb=0,avgC=0,donors=new Set;for(let i=0;i<walk.length;i++){let n=walk[i],step=steps.get(n),lab=reference[n].lab,rc=chroma(lab),code=out[n]?.id,w=Math.exp(-(step*step)/4)*Math.exp(-((lab[0]-meanL)**2)/.018);if(step){if(WARM_IDS.has(code)&&rc>=.022&&lab[1]>.001&&lab[2]>.002){warmWeight+=w;aa+=lab[1]*w;bb+=lab[2]*w;avgC+=rc*w;donors.add(n)}else if(out[n]&&!NEUTRAL_IDS.has(code)&&rc>=.030)conflict+=w}if(step>=5)continue;for(let m of gridNeighbors(n,cols,rows)){if(steps.has(m)||!out[m]||referenceDistance(reference,n,m)>=.078)continue;steps.set(m,step+1);walk.push(m)}}let share=warmWeight/Math.max(.001,warmWeight+conflict);if(warmWeight<1.2||donors.size<2||share<.75||comp.length===1&&(donors.size<3||share<.82))continue;let ga=aa/warmWeight,gb=bb/warmWeight,guideC=Math.hypot(ga,gb),coherence=guideC/Math.max(.001,avgC/warmWeight);if(coherence<.70)continue;let proposals=new Map;for(let n of comp){let ref=reference[n].lab,rc=chroma(ref);if(rc>.060&&(ref[1]*ga+ref[2]*gb)/Math.max(.001,rc*guideC)<Math.cos(55*Math.PI/180))continue;let candidateCost=c=>{let cc=c.C??chroma(c.lab),cos=(ga*c.lab[1]+gb*c.lab[2])/Math.max(.001,guideC*cc);return 2.4*(target[n].lab[0]-c.lab[0])**2+.9*(guideC-cc)**2+2*guideC*cc*(1-Math.max(-1,Math.min(1,cos)))},valid=[];for(let candidate of warmCandidates){if(Math.abs(target[n].lab[0]-candidate.lab[0])>Math.abs(target[n].lab[0]-out[n].lab[0])+.045)continue;let safe=true;for(let m of gridNeighbors(n,cols,rows)){if(!out[m]||!target[m])continue;let sourceDL=target[n].lab[0]-target[m].lab[0],resultDL=candidate.lab[0]-out[m].lab[0];if(Math.abs(sourceDL)>=.035&&sourceDL*resultDL<0){safe=false;break}let sourceEdge=referenceDistance(reference,n,m);if(sourceEdge>=.075){let oldSep=Math.sqrt(d(out[n].lab,out[m].lab)),newSep=Math.sqrt(d(candidate.lab,out[m].lab));if(newSep<Math.min(oldSep,.055)){safe=false;break}}}if(safe)valid.push(candidate)}if(!valid.length)continue;let best=valid.reduce((a,c)=>candidateCost(c)<candidateCost(a)?c:a);if(candidateCost(best)<=candidateCost(out[n])+.015)proposals.set(n,best)}if(proposals.size<Math.max(1,Math.ceil(.35*comp.length)))continue;for(let [n,candidate] of proposals)result[n]=candidate}return result}
+function repairWarmGrayBasins(reference,slots,target,context,out,use,cols,rows){
+  let warmCandidates=use.filter(c=>["19","20","21","31","32"].includes(c.id));
+  if(!warmCandidates.length)return out;
+  let seen=new Uint8Array(out.length),result=out.slice();
+  for(let start=0;start<out.length;start++){
+    if(seen[start]||!out[start]||!GRAY_IDS.has(out[start].id))continue;
+    let comp=[],queue=[start];seen[start]=1;
+    while(queue.length){
+      let n=queue.pop();comp.push(n);
+      for(let m of gridNeighbors(n,cols,rows)){
+        if(seen[m]||!out[m]||!GRAY_IDS.has(out[m].id)||referenceDistance(reference,n,m)>=.067)continue;
+        seen[m]=1;queue.push(m);
+      }
+    }
+    let meanL=comp.reduce((s,n)=>s+reference[n].lab[0],0)/comp.length;
+    if(meanL<=.34||meanL>=.82)continue;
+    let walk=comp.slice(),steps=new Map(comp.map(n=>[n,0])),warmWeight=0,conflict=0,aa=0,bb=0,avgC=0,donors=new Set;
+    for(let i=0;i<walk.length;i++){
+      let n=walk[i],step=steps.get(n),lab=reference[n].lab,rc=chroma(lab),code=out[n]?.id;
+      if(step){
+        let w=Math.exp(-(step*step)/4)*Math.exp(-((lab[0]-meanL)**2)/.018);
+        if(WARM_IDS.has(code)&&rc>=.022&&lab[1]>.001&&lab[2]>.002){
+          warmWeight+=w;aa+=lab[1]*w;bb+=lab[2]*w;avgC+=rc*w;donors.add(n);
+        }else if(out[n]&&!NEUTRAL_IDS.has(code)&&rc>=.030)conflict+=w;
+      }
+      if(step>=6)continue;
+      for(let m of gridNeighbors(n,cols,rows)){
+        if(steps.has(m)||!out[m]||referenceDistance(reference,n,m)>=.085)continue;
+        steps.set(m,step+1);walk.push(m);
+      }
+    }
+    let share=warmWeight/Math.max(.001,warmWeight+conflict);
+    if(warmWeight<.90||donors.size<2||share<.62||comp.length===1&&(donors.size<3||share<.80))continue;
+    let ga=aa/warmWeight,gb=bb/warmWeight,guideC=Math.hypot(ga,gb),coherence=guideC/Math.max(.001,avgC/warmWeight);
+    if(coherence<.62)continue;
+    let proposals=new Map;
+    for(let n of comp){
+      let ref=reference[n].lab,rc=chroma(ref);
+      if(rc>.075&&(ref[1]*ga+ref[2]*gb)/Math.max(.001,rc*guideC)<Math.cos(60*Math.PI/180))continue;
+      let candidateCost=c=>{
+        let cc=c.C??chroma(c.lab),cos=(ga*c.lab[1]+gb*c.lab[2])/Math.max(.001,guideC*cc);
+        return 2.4*(target[n].lab[0]-c.lab[0])**2+.9*(guideC-cc)**2+2*guideC*cc*(1-Math.max(-1,Math.min(1,cos)));
+      },valid=[];
+      for(let candidate of warmCandidates){
+        if(Math.abs(target[n].lab[0]-candidate.lab[0])>Math.abs(target[n].lab[0]-out[n].lab[0])+.060)continue;
+        let safe=true;
+        for(let m of gridNeighbors(n,cols,rows)){
+          if(!out[m]||!target[m])continue;
+          let sourceDL=target[n].lab[0]-target[m].lab[0],resultDL=candidate.lab[0]-out[m].lab[0];
+          if(Math.abs(sourceDL)>=.035&&sourceDL*resultDL<0){safe=false;break}
+          if(referenceDistance(reference,n,m)>=.075){
+            let oldSep=Math.sqrt(d(out[n].lab,out[m].lab)),newSep=Math.sqrt(d(candidate.lab,out[m].lab));
+            if(newSep<Math.min(oldSep,.055)){safe=false;break}
+          }
+        }
+        if(safe)valid.push(candidate);
+      }
+      if(!valid.length)continue;
+      let best=valid.reduce((a,c)=>candidateCost(c)<candidateCost(a)?c:a);
+      if(candidateCost(best)<=candidateCost(out[n])+.025)proposals.set(n,best);
+    }
+    if(proposals.size<Math.max(1,Math.ceil(.25*comp.length)))continue;
+    for(let [n,candidate] of proposals)result[n]=candidate;
+  }
+  return result;
+}
 const FAMILY_GREEN=new Set(["01","02","03","04"]),FAMILY_CYAN=new Set(["05","06","07","08","09","10"]),FAMILY_PURPLE=new Set(["15","16","17"]),FAMILY_RED=new Set(["18","22","23","24","25","26"]),FAMILY_WARM=new Set(["11","12","13","14","19","20","21","31","32"]);
 function toneFamily(id){if(FAMILY_GREEN.has(id))return"green";if(FAMILY_CYAN.has(id))return"cyan";if(FAMILY_PURPLE.has(id))return"purple";if(NEUTRAL_IDS.has(id))return"neutral";if(FAMILY_WARM.has(id))return"warm";if(FAMILY_RED.has(id))return"red";return id}
-function cohereFinalFamilies(reference,slots,target,context,out,cols,rows){let seen=new Uint8Array(out.length),result=out.slice();for(let start=0;start<out.length;start++){if(seen[start]||!out[start])continue;let sourceFamily=toneFamily(out[start].id),comp=[],queue=[start];seen[start]=1;while(queue.length){let n=queue.pop();comp.push(n);for(let m of gridNeighbors(n,cols,rows)){if(seen[m]||!out[m]||toneFamily(out[m].id)!==sourceFamily||referenceDistance(reference,n,m)>=.060)continue;seen[m]=1;queue.push(m)}}let maxSize=["neutral","cyan","purple"].includes(sourceFamily)?4:2;if(comp.length>maxSize)continue;let compSet=new Set(comp),votes=new Map,candidateMap=new Map,boundary=0;for(let n of comp)for(let m of gridNeighbors(n,cols,rows)){if(compSet.has(m)||!out[m]||referenceDistance(reference,n,m)>=.060)continue;let family=toneFamily(out[m].id);votes.set(family,(votes.get(family)||0)+1);candidateMap.set(out[m].id,out[m]);boundary++}if(boundary<3||!votes.size)continue;let [dominant,count]=[...votes].sort((a,b)=>b[1]-a[1])[0],share=count/boundary,needed=dominant==="warm"&&["neutral","cyan","purple"].includes(sourceFamily)?.80:.75;if(dominant===sourceFamily||share<needed||comp.length>2&&dominant!=="warm")continue;let candidates=[...candidateMap.values()].filter(c=>toneFamily(c.id)===dominant);if(!candidates.length)continue;let replacements=new Map,safeComponent=true;for(let n of comp){let L=target[n].lab[0],source=slots[n].lab,sc=chroma(source);if(L<=.48||L>=.88){safeComponent=false;break}let cc=out[n].C??chroma(out[n].lab);if(sc>=.10&&cc>.001&&(source[1]*out[n].lab[1]+source[2]*out[n].lab[2])/Math.max(.001,sc*cc)>=Math.cos(38*Math.PI/180)){safeComponent=false;break}let sourceForCost=sc<.09&&context[n]&&chroma(context[n].lab)>.012?context[n].lab:source,valid=[];for(let candidate of candidates){if(Math.abs(L-candidate.lab[0])>Math.abs(L-out[n].lab[0])+.025)continue;if(unifiedCost(target[n].lab,sourceForCost,candidate)>unifiedCost(target[n].lab,sourceForCost,out[n])+.012)continue;let safe=true;for(let m of gridNeighbors(n,cols,rows)){if(!out[m]||!target[m])continue;let sourceDL=L-target[m].lab[0],resultDL=candidate.lab[0]-out[m].lab[0];if(Math.abs(sourceDL)>=.025&&sourceDL*resultDL<0){safe=false;break}}if(safe)valid.push(candidate)}if(!valid.length){safeComponent=false;break}let best=valid.reduce((a,c)=>unifiedCost(target[n].lab,sourceForCost,c)<unifiedCost(target[n].lab,sourceForCost,a)?c:a);replacements.set(n,best)}if(!safeComponent)continue;for(let [n,candidate] of replacements)result[n]=candidate}return result}
-function cohereLightSurfaces(reference,slots,target,context,out,initialOut,use,cols,rows){let palette=new Map(use.map(c=>[c.id,c])),seedCodes=new Set(["30","06","15","27"]),eligible=new Uint8Array(out.length);for(let n=0;n<out.length;n++){if(!out[n]||!initialOut[n]||!reference[n]||!target[n]||!seedCodes.has(initialOut[n].id)||target[n].lab[0]<.62||chroma(reference[n].lab)>.11)continue;let x=n%cols,y=Math.floor(n/cols),seedWeight=0,total=0;for(let yy=Math.max(0,y-2);yy<=Math.min(rows-1,y+2);yy++)for(let xx=Math.max(0,x-2);xx<=Math.min(cols-1,x+2);xx++){let m=yy*cols+xx;if(!reference[m]||!target[m]||!initialOut[m])continue;let ds=(xx-x)**2+(yy-y)**2,w=Math.exp(-ds/4);total+=w;if(seedCodes.has(initialOut[m].id)&&target[m].lab[0]>=.62&&chroma(reference[m].lab)<=.11)seedWeight+=w}if(seedWeight/Math.max(.001,total)>=.55)eligible[n]=1}let seen=new Uint8Array(out.length),result=out.slice();for(let start=0;start<out.length;start++){if(seen[start]||!eligible[start])continue;let comp=[],queue=[start];seen[start]=1;while(queue.length){let n=queue.pop();comp.push(n);for(let m of gridNeighbors(n,cols,rows)){if(seen[m]||!eligible[m]||referenceDistance(reference,n,m)>=.072)continue;seen[m]=1;queue.push(m)}}if(comp.length<6)continue;let warmSurface=comp.reduce((s,n)=>s+(FAMILY_WARM.has(out[n]?.id)?1:0),0);if(warmSurface/comp.length>=.08)continue;let meanA=comp.reduce((s,n)=>s+reference[n].lab[1],0)/comp.length,meanB=comp.reduce((s,n)=>s+reference[n].lab[2],0)/comp.length,meanC=comp.reduce((s,n)=>s+chroma(reference[n].lab),0)/comp.length,coherence=Math.hypot(meanA,meanB)/Math.max(.001,meanC);if(coherence<.55||meanB>=-.010)continue;let compSet=new Set(comp),ring=new Set;for(let n of comp)for(let m of gridNeighbors(n,cols,rows))if(!compSet.has(m)&&out[m])ring.add(m);let warmRing=[...ring].reduce((s,m)=>s+(FAMILY_WARM.has(out[m].id)?1:0),0);if(warmRing>=2&&warmRing/Math.max(1,ring.size)>=.18)continue;let locked=new Set;for(let n of comp)for(let m of gridNeighbors(n,cols,rows)){if(!out[m])continue;let sourceDelta=reference[n].lab.map((v,k)=>v-reference[m].lab[k]),sourceDist=Math.sqrt(sourceDelta.reduce((s,v)=>s+v*v,0));if(sourceDist<.075)continue;let paletteDelta=out[n].lab.map((v,k)=>v-out[m].lab[k]),paletteDist=Math.sqrt(paletteDelta.reduce((s,v)=>s+v*v,0));if(paletteDist<.035)continue;let alignment=sourceDelta.reduce((s,v,k)=>s+v*paletteDelta[k],0)/Math.max(.001,sourceDist*paletteDist);if(alignment>=.30){locked.add(n);break}}let proposals=new Map;for(let n of comp){if(locked.has(n)||FAMILY_WARM.has(out[n].id)||FAMILY_RED.has(out[n].id))continue;let toneL=.70*reference[n].lab[0]+.30*context[n].lab[0],code=toneL>=.855?"30":toneL>=.745?"06":"15",candidate=palette.get(code);if(!candidate||out[n].id===code)continue;let source=sourceContext(slots[n],context[n]);if(unifiedCost(target[n].lab,source,candidate)>unifiedCost(target[n].lab,source,out[n])+.015)continue;let inversion=false;for(let m of gridNeighbors(n,cols,rows)){if(!compSet.has(m)||!out[m])continue;let sourceDL=reference[n].lab[0]-reference[m].lab[0],resultDL=candidate.lab[0]-out[m].lab[0];if(Math.abs(sourceDL)>=.025&&sourceDL*resultDL<0){inversion=true;break}}if(!inversion)proposals.set(n,candidate)}for(let [n,candidate] of proposals)result[n]=candidate}return result}
+function cohereFinalFamilies(reference,slots,target,context,out,cols,rows){
+  let seen=new Uint8Array(out.length),result=out.slice();
+  for(let start=0;start<out.length;start++){
+    if(seen[start]||!out[start])continue;
+    let sourceFamily=toneFamily(out[start].id),comp=[],queue=[start];seen[start]=1;
+    while(queue.length){
+      let n=queue.pop();comp.push(n);
+      for(let m of gridNeighbors(n,cols,rows)){
+        if(seen[m]||!out[m]||toneFamily(out[m].id)!==sourceFamily||referenceDistance(reference,n,m)>=.060)continue;
+        seen[m]=1;queue.push(m);
+      }
+    }
+    let maxSize=["neutral","cyan","purple"].includes(sourceFamily)?10:2;
+    if(comp.length>maxSize)continue;
+    let compSet=new Set(comp),votes=new Map,candidateMap=new Map,boundary=0;
+    for(let n of comp)for(let m of gridNeighbors(n,cols,rows)){
+      if(compSet.has(m)||!out[m]||referenceDistance(reference,n,m)>=.060)continue;
+      let family=toneFamily(out[m].id);
+      votes.set(family,(votes.get(family)||0)+1);candidateMap.set(out[m].id,out[m]);boundary++;
+    }
+    if(boundary<3||!votes.size)continue;
+    let [dominant,count]=[...votes].sort((a,b)=>b[1]-a[1])[0],share=count/boundary;
+    let needed=dominant==="warm"&&["neutral","cyan","purple"].includes(sourceFamily)?.72:.75;
+    if(dominant===sourceFamily||share<needed||comp.length>2&&dominant!=="warm")continue;
+    let candidates=[...candidateMap.values()].filter(c=>toneFamily(c.id)===dominant);
+    if(!candidates.length)continue;
+    let replacements=new Map,safeComponent=true;
+    for(let n of comp){
+      let L=target[n].lab[0],source=slots[n].lab,sc=chroma(source);
+      if(L<=.42||L>=.90){safeComponent=false;break}
+      let cc=out[n].C??chroma(out[n].lab);
+      if(sc>=.10&&cc>.001&&(source[1]*out[n].lab[1]+source[2]*out[n].lab[2])/Math.max(.001,sc*cc)>=Math.cos(38*Math.PI/180)){
+        safeComponent=false;break;
+      }
+      let sourceForCost=sc<.09&&context[n]&&chroma(context[n].lab)>.012?context[n].lab:source,valid=[];
+      for(let candidate of candidates){
+        if(Math.abs(L-candidate.lab[0])>Math.abs(L-out[n].lab[0])+.040)continue;
+        if(unifiedCost(target[n].lab,sourceForCost,candidate)>unifiedCost(target[n].lab,sourceForCost,out[n])+.020)continue;
+        let safe=true;
+        for(let m of gridNeighbors(n,cols,rows)){
+          if(!out[m]||!target[m])continue;
+          let sourceDL=L-target[m].lab[0],resultDL=candidate.lab[0]-out[m].lab[0];
+          if(Math.abs(sourceDL)>=.025&&sourceDL*resultDL<0){safe=false;break}
+        }
+        if(safe)valid.push(candidate);
+      }
+      if(!valid.length){safeComponent=false;break}
+      let best=valid.reduce((a,c)=>unifiedCost(target[n].lab,sourceForCost,c)<unifiedCost(target[n].lab,sourceForCost,a)?c:a);
+      replacements.set(n,best);
+    }
+    if(!safeComponent)continue;
+    for(let [n,candidate] of replacements)result[n]=candidate;
+  }
+  return result;
+}
+function cohereLightSurfaces(reference,slots,target,context,out,initialOut,use,cols,rows){
+  let palette=new Map(use.map(c=>[c.id,c])),seedCodes=new Set(["30","06","15","27"]),eligible=new Uint8Array(out.length);
+  for(let n=0;n<out.length;n++){
+    if(!out[n]||!initialOut[n]||!reference[n]||!target[n]||!seedCodes.has(initialOut[n].id)||target[n].lab[0]<.62||chroma(reference[n].lab)>.14)continue;
+    let x=n%cols,y=Math.floor(n/cols),seedWeight=0,total=0;
+    for(let yy=Math.max(0,y-2);yy<=Math.min(rows-1,y+2);yy++)for(let xx=Math.max(0,x-2);xx<=Math.min(cols-1,x+2);xx++){
+      let m=yy*cols+xx;
+      if(!reference[m]||!target[m]||!initialOut[m])continue;
+      let ds=(xx-x)**2+(yy-y)**2,w=Math.exp(-ds/4);total+=w;
+      if(seedCodes.has(initialOut[m].id)&&target[m].lab[0]>=.62&&chroma(reference[m].lab)<=.14)seedWeight+=w;
+    }
+    if(seedWeight/Math.max(.001,total)>=.45)eligible[n]=1;
+  }
+  let seen=new Uint8Array(out.length),result=out.slice(),acceptedCells=new Set,warmProtected=new Set;
+  for(let start=0;start<out.length;start++){
+    if(seen[start]||!eligible[start])continue;
+    let comp=[],queue=[start];seen[start]=1;
+    while(queue.length){
+      let n=queue.pop();comp.push(n);
+      for(let m of gridNeighbors(n,cols,rows)){
+        if(seen[m]||!eligible[m]||referenceDistance(reference,n,m)>=.085)continue;
+        seen[m]=1;queue.push(m);
+      }
+    }
+    if(comp.length<6)continue;
+    let warmSurface=comp.reduce((s,n)=>s+(FAMILY_WARM.has(out[n]?.id)?1:0),0);
+    if(warmSurface/comp.length>=.08)continue;
+    let meanA=comp.reduce((s,n)=>s+reference[n].lab[1],0)/comp.length;
+    let meanB=comp.reduce((s,n)=>s+reference[n].lab[2],0)/comp.length;
+    let meanC=comp.reduce((s,n)=>s+chroma(reference[n].lab),0)/comp.length;
+    let coherence=Math.hypot(meanA,meanB)/Math.max(.001,meanC);
+    if(coherence<.42||meanB>=-.006)continue;
+    let compSet=new Set(comp),ring=new Set;
+    for(let n of comp)for(let m of gridNeighbors(n,cols,rows))if(!compSet.has(m)&&out[m])ring.add(m);
+    let warmRing=[...ring].reduce((s,m)=>s+(FAMILY_WARM.has(out[m].id)?1:0),0);
+    if(warmRing>=2&&warmRing/Math.max(1,ring.size)>=.18)continue;
+    for(let n of comp)acceptedCells.add(n);
+    let proposals=new Map;
+    for(let n of comp){
+      if(!out[n]||FAMILY_WARM.has(out[n].id)||FAMILY_RED.has(out[n].id))continue;
+      let x=n%cols,y=Math.floor(n/cols),warmWeight=0,totalWeight=0;
+      for(let yy=Math.max(0,y-6);yy<=Math.min(rows-1,y+6);yy++)for(let xx=Math.max(0,x-6);xx<=Math.min(cols-1,x+6);xx++){
+        let m=yy*cols+xx;
+        if(!out[m])continue;
+        let ds=(xx-x)**2+(yy-y)**2,w=Math.exp(-ds/6);totalWeight+=w;
+        if(FAMILY_WARM.has(out[m].id))warmWeight+=w;
+      }
+      if(warmWeight/Math.max(.001,totalWeight)>=.0001){warmProtected.add(n);continue}
+      let toneL=.55*reference[n].lab[0]+.45*context[n].lab[0];
+      let code=toneL>=.800?"30":toneL>=.745?"06":"15",candidate=palette.get(code);
+      if(!candidate||out[n].id===code)continue;
+      let source=sourceContext(slots[n],context[n]);
+      if(unifiedCost(target[n].lab,source,candidate)>unifiedCost(target[n].lab,source,out[n])+1.10)continue;
+      proposals.set(n,candidate);
+    }
+    for(let [n,candidate] of proposals)result[n]=candidate;
+  }
+  let lightCodes=new Set(["30","06","15"]);
+  for(let pass=0;pass<2;pass++){
+    let next=result.slice();
+    for(let n of acceptedCells){
+      if(warmProtected.has(n)||!result[n]||!lightCodes.has(result[n].id))continue;
+      let preservesEdge=false;
+      for(let m of gridNeighbors(n,cols,rows)){
+        if(!result[m]||!reference[m])continue;
+        let sourceDelta=reference[n].lab.map((v,k)=>v-reference[m].lab[k]),sourceDist=Math.sqrt(sourceDelta.reduce((s,v)=>s+v*v,0));
+        if(sourceDist<.18)continue;
+        let paletteDelta=result[n].lab.map((v,k)=>v-result[m].lab[k]),paletteDist=Math.sqrt(paletteDelta.reduce((s,v)=>s+v*v,0));
+        if(paletteDist<.035)continue;
+        let alignment=sourceDelta.reduce((s,v,k)=>s+v*paletteDelta[k],0)/Math.max(.001,sourceDist*paletteDist);
+        if(alignment>=.30){preservesEdge=true;break}
+      }
+      if(preservesEdge)continue;
+      let nearby=gridNeighbors(n,cols,rows).filter(m=>result[m]&&lightCodes.has(result[m].id));
+      if(nearby.some(m=>result[m].id===result[n].id))continue;
+      let votes=new Map;
+      for(let m of nearby)votes.set(result[m].id,(votes.get(result[m].id)||0)+1);
+      if(!votes.size)continue;
+      let [code,count]=[...votes].sort((a,b)=>b[1]-a[1])[0];
+      if(count<2)continue;
+      let candidate=palette.get(code);
+      if(!candidate)continue;
+      let source=sourceContext(slots[n],context[n]);
+      if(unifiedCost(target[n].lab,source,candidate)>unifiedCost(target[n].lab,source,result[n])+1.10)continue;
+      next[n]=candidate;
+    }
+    result=next;
+  }
+  return result;
+}
 function preventNewInversions(reference,before,after,cols,rows){let result=after.slice();for(let pass=0;pass<4;pass++){let revert=new Set;for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){let n=y*cols+x;if(!reference[n]||!before[n]||!result[n])continue;for(let m of [x+1<cols?n+1:-1,y+1<rows?n+cols:-1]){if(m<0||!reference[m]||!before[m]||!result[m])continue;let sourceDL=reference[n].lab[0]-reference[m].lab[0];if(Math.abs(sourceDL)<.025)continue;let beforeDL=before[n].lab[0]-before[m].lab[0],afterDL=result[n].lab[0]-result[m].lab[0];if(sourceDL*beforeDL>=0&&sourceDL*afterDL<0){if(result[n].id!==before[n].id)revert.add(n);if(result[m].id!==before[m].id)revert.add(m)}}}if(!revert.size)break;for(let n of revert)result[n]=before[n]}return result}
 function mapUnified(slots,use,cols,rows,reference=slots){let target=slots,context=smoothSlots(slots,cols,rows,3,.11);let out=slots.map((p,n)=>{if(!p)return null;let source=sourceContext(p,context[n]),best=use[0],bd=Infinity;for(let c of use){let q=unifiedCost(target[n].lab,source,c);if(q<bd){bd=q;best=c}}return best}),initialOut=out.slice();out=separatePaletteBoundaries(slots,target,context,out,use,cols,rows);addPipelineStage("3. 경계 색 분리","팔레트 최초 매칭 뒤 대비가 큰 경계의 양쪽 색을 먼저 분리",out,cols,rows);out=stabilizePaletteHues(slots,target,context,out,initialOut,use,cols,rows);out=diversifyLightTones(slots,target,context,out,initialOut,use,cols,rows);let coherenceBase=out.slice();out=repairWarmGrayBasins(reference,slots,target,context,out,use,cols,rows);out=cohereLightSurfaces(reference,slots,target,context,out,initialOut,use,cols,rows);out=cohereFinalFamilies(reference,slots,target,context,out,cols,rows);out=preventNewInversions(reference,coherenceBase,out,cols,rows);addPipelineStage("4. 색조·흰색 명암 조정 · 최종","분리된 경계를 유지하면서 머리색·흰색 명암과 작은 색 조각을 최종 정리",out,cols,rows);return out}
 function schedule(){clearTimeout(timer);if(img)timer=setTimeout(generate,150)}
