@@ -309,13 +309,17 @@ function m3FuseAxes(reference,detailAxis,regionAxis,toneAxis,cols,rows){
     let votes=new Map;
     for(let c of candidates)votes.set(c.id,(votes.get(c.id)||0)+1);
     let consensus=[...votes].sort((a,b)=>b[1]-a[1])[0];
-    if(edge>=.46){out[n]=detailAxis[n];continue}
+    if(edge>=.52){out[n]=detailAxis[n];continue}
+    let regionalAgreement=gridNeighbors(n,cols,rows).filter(m=>regionAxis[m]&&regionAxis[n]&&regionAxis[m].id===regionAxis[n].id).length;
+    if(edge<=.40&&regionalAgreement>=2){
+      out[n]=regionAxis[n];
+      continue
+    }
     if(consensus&&consensus[1]>=2){
       out[n]=candidates.find(c=>c.id===consensus[0])||detailAxis[n];
       continue
     }
-    let regionalAgreement=gridNeighbors(n,cols,rows).filter(m=>regionAxis[m]&&regionAxis[n]&&regionAxis[m].id===regionAxis[n].id).length;
-    if(edge<=.20&&regionalAgreement>=2)out[n]=regionAxis[n];
+    if(edge<=.46&&regionalAgreement>=1)out[n]=regionAxis[n];
     else out[n]=m3ToneChoice(reference,n,candidates)||detailAxis[n];
   }
   return out;
@@ -345,7 +349,7 @@ function mapMultiAxis(slots,use,cols,rows,reference=slots){
   let fused=m3FuseAxes(reference,detail,region,tone,cols,rows);
   fused=m2PreserveStrongEdges(reference,detail,fused,cols,rows);
   fused=preventNewInversions(reference,detail,fused,cols,rows);
-  addPipelineStage("6. 축별 신뢰도 결합 · 최종","강경계는 세부 축, 균일 영역은 응집 축, 나머지는 명암 합의로 선택",fused,cols,rows);
+  addPipelineStage("6. 축별 신뢰도 결합 · 최종","강경계만 세부 축으로 잠그고 연결된 저대비 영역은 응집 축을 우선 선택",fused,cols,rows);
   return fused
 }
 
